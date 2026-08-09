@@ -34,6 +34,7 @@
     keepAlive: true,
     keepAliveGain: 0.0035,
     senderRefreshMs: 250,
+    desktopCallSafeMode: true,
     isAndroidQuetta: /Android|Quetta/i.test(navigator.userAgent)
   };
   const MSG_CFG = 'MIC_MAXIMIZER_CONFIG';
@@ -61,7 +62,8 @@
     lastAudioConstraints: { audio: true },
     lateJoinDetected: false,
     aggressiveRecoveryActive: false,
-    healthCheckTimer: null
+    healthCheckTimer: null,
+    callModeActive: false
   };
   const clamp = (value, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Number(value) : min));
   const dbToLinear = (db) => Math.pow(10, db / 20);
@@ -118,6 +120,30 @@
     merged.keepAlive = Boolean(merged.keepAlive);
     merged.keepAliveGain = clamp(merged.keepAliveGain, 0, 0.006);
     merged.senderRefreshMs = state.aggressiveRecoveryActive ? 150 : clamp(merged.senderRefreshMs, 150, 1500);
+    merged.desktopCallSafeMode = merged.desktopCallSafeMode !== false;
+
+    // Desktop Meta WebRTC calls run a second server/browser voice pipeline
+    // after this extension. The Android profile's extreme clipped/reverbed
+    // signal is fine for Quetta and for desktop voice-message recording, but
+    // on desktop calls it can be classified as invalid/noise and transmitted
+    // as silence. When a PeerConnection exists on desktop, keep the extension
+    // loud but inside a speech-shaped range that WebRTC reliably forwards.
+    if (merged.desktopCallSafeMode && !merged.isAndroidQuetta && state.callModeActive) {
+      merged.gainDb = Math.min(merged.gainDb, 86);
+      merged.loudness = Math.min(merged.loudness, 3.5);
+      merged.drive = Math.min(merged.drive, 2.4);
+      merged.saturationCurveIntensity = Math.min(merged.saturationCurveIntensity, 2.4);
+      merged.lowShelfDb = Math.min(merged.lowShelfDb, 18);
+      merged.presenceDb = Math.min(merged.presenceDb, 24);
+      merged.presencePeakDb = Math.min(merged.presencePeakDb, 18);
+      merged.highShelfDb = Math.min(merged.highShelfDb, 24);
+      merged.thresholdDb = Math.max(merged.thresholdDb, -72);
+      merged.sustainTargetDb = Math.min(merged.sustainTargetDb, -6);
+      merged.sustainMaxGain = Math.min(merged.sustainMaxGain, 120);
+      merged.reverbWet = Math.min(merged.reverbWet, 0.12);
+      merged.reverbFeedback = Math.min(merged.reverbFeedback, 0.25);
+      merged.keepAliveGain = Math.min(merged.keepAliveGain, 0.0012);
+    }
     return merged;
   }
 
@@ -667,6 +693,11 @@
     const closed = ['closed', 'failed'].includes(pc.connectionState || pc.iceConnectionState || '');
     if (closed) {
       state.peerConnections.delete(pc);
+      if (!state.peerConnections.size) {
+        state.callModeActive = false;
+        state.config = cfg(state.config);
+        updateAllPipelines(state.config);
+      }
       return;
     }
 
@@ -683,6 +714,11 @@
   function rememberPeerConnection(pc) {
     if (!pc || state.peerConnections.has(pc)) return;
     state.peerConnections.add(pc);
+    if (!state.callModeActive) {
+      state.callModeActive = true;
+      state.config = cfg(state.config);
+      updateAllPipelines(state.config);
+    }
     diag(`new RTCPeerConnection registered (${state.peerConnections.size} total tracked)`);
     
     // LATE JOIN DETECTION: PC joins after existing connections
@@ -698,7 +734,14 @@
         pc.addEventListener(type, audit, { passive: true });
       });
       pc.addEventListener('connectionstatechange', () => {
-        if (['closed', 'failed'].includes(pc.connectionState)) state.peerConnections.delete(pc);
+        if (['closed', 'failed'].includes(pc.connectionState)) {
+          state.peerConnections.delete(pc);
+          if (!state.peerConnections.size) {
+            state.callModeActive = false;
+            state.config = cfg(state.config);
+            updateAllPipelines(state.config);
+          }
+        }
       });
     }
   }
