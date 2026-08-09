@@ -1,0 +1,788 @@
+/*
+  Omni Messenger Hub — popup stylesheet
+  ------------------------------------------------
+  Brand: Murgi Kheko Voice Gang. The crest artwork you provided is used
+  directly as the header mark and as a soft background watermark; the
+  --brand-* tokens below are sampled from that same artwork's real pixels
+  (deep maroon body, aged pewter/rose-silver metalwork, warm highlight)
+  so the surrounding chrome (panel background, borders, dividers, the
+  default/no-preset-match accent) reads as one consistent object instead
+  of an image pasted onto an unrelated UI.
+
+  Design direction underneath that: this popup is still a mixing console
+  for one channel — your microphone — so sliders read as recessed faders
+  with an accurate fill level and a tick-marked scale, and every numeric
+  readout uses a tabular monospace "LCD" treatment.
+
+  The three preset identities keep their own functional colors exactly as
+  before (Royal Clear = green, Lord V4 = gold, Ultra Quetta = cyan) since
+  that's how you tell which mode is active at a glance — only the base
+  "custom" state (no preset currently matches) and the constant frame
+  around everything now carry the Murgi Kheko palette, rather than a
+  generic default.
+
+  Every class/id/attribute the JS reads (.preset/.royal/.lord/
+  .ultraQuetta/.active, .status/.ok/.warn, .switch/.slider, .field,
+  .checkField, and every control id) is unchanged — this file only
+  changes appearance.
+*/
+
+:root {
+  color-scheme: dark;
+
+  --bg-0: #050205;
+  --bg-1: #150409;
+  --bg-2: #1f0810;
+  --surface: rgba(28, 10, 16, 0.62);
+  --surface-strong: rgba(32, 12, 18, 0.92);
+  --well: rgba(5, 2, 4, 0.6);
+  --line: rgba(226, 200, 190, 0.14);
+  --line-strong: rgba(226, 200, 190, 0.30);
+  --text: #f6efe9;
+  --text-dim: rgba(246, 239, 233, 0.68);
+  --text-faint: rgba(246, 239, 233, 0.42);
+
+  /* Sampled from the crest artwork itself. */
+  --brand-deep: #300c18;
+  --brand-mid: #6b2436;
+  --brand-metal: #8c7672;
+  --brand-metal-light: #d8c9bd;
+  --brand-glow: rgba(150, 40, 62, 0.4);
+
+  /* Default "custom" identity — shown whenever the current values don't
+     match a named preset. Now the Murgi Kheko palette itself, rather
+     than an unrelated placeholder color. */
+  --accent: #e0495f;
+  --accent-2: #b8283f;
+  --accent-3: var(--brand-metal-light);
+  --glow: var(--brand-glow);
+  --mono: #ffd9c2;
+}
+
+* { box-sizing: border-box; }
+
+html { background: var(--bg-0); }
+
+body {
+  width: min(392px, 100vw);
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 12% -6%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 38%),
+    radial-gradient(circle at 96% 18%, color-mix(in srgb, var(--accent-2) 32%, transparent), transparent 40%),
+    radial-gradient(circle at 50% 108%, color-mix(in srgb, var(--brand-mid) 46%, transparent), transparent 52%),
+    linear-gradient(160deg, var(--bg-0), var(--bg-1) 55%, var(--bg-2));
+}
+
+body[data-theme="royal"] {
+  --accent: #3ce88a;
+  --accent-2: #12b876;
+  --accent-3: #b8ffdd;
+  --glow: rgba(60, 232, 138, 0.34);
+  --mono: #c3ffe4;
+}
+
+body[data-theme="lord"] {
+  --accent: #ffcf3d;
+  --accent-2: #ff9a1f;
+  --accent-3: #fff3c2;
+  --glow: rgba(255, 178, 26, 0.38);
+  --mono: #ffe9a8;
+}
+
+body[data-theme="ultraQuetta"] {
+  --accent: #34e3ff;
+  --accent-2: #12a3e0;
+  --accent-3: #cdfaff;
+  --glow: rgba(52, 227, 255, 0.42);
+  --mono: #baf5ff;
+}
+
+body[data-theme="apex"] {
+  --accent: #ff3b3b;
+  --accent-2: #d40f0f;
+  --accent-3: #ffcac2;
+  --glow: rgba(255, 59, 59, 0.44);
+  --mono: #ffcdbf;
+}
+
+/* ---------------------------------------------------------------------
+   Panel shell
+--------------------------------------------------------------------- */
+
+.panel {
+  position: relative;
+  margin: 10px;
+  padding: 16px;
+  overflow: hidden;
+  border: 1px solid var(--brand-metal);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 55%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.06), color-mix(in srgb, var(--brand-deep) 55%, rgba(8, 6, 14, 0.94)));
+  box-shadow:
+    0 28px 64px rgba(0, 0, 0, 0.78),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 0 0 4px rgba(3, 1, 2, 0.7),
+    inset 0 0 0 5px color-mix(in srgb, var(--brand-metal) 55%, transparent);
+  backdrop-filter: blur(20px);
+  transition: box-shadow 0.3s ease, background 0.3s ease;
+}
+
+.panel::before,
+.panel::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 999px;
+  transition: background 0.35s ease;
+}
+
+.panel::before {
+  inset: -80px -50px auto auto;
+  width: 190px;
+  height: 190px;
+  background: radial-gradient(circle, var(--glow), transparent 68%);
+}
+
+.panel::after {
+  inset: auto auto -100px -60px;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-2) 30%, transparent), transparent 70%);
+}
+
+/* Full crest artwork, pre-blurred and baked to low opacity (see
+   popup/brand/), sitting behind the header as a textural watermark
+   rather than a competing second logo. Purely decorative. */
+.brandWatermark {
+  position: absolute;
+  z-index: 0;
+  top: 40px;
+  left: 50%;
+  width: 640px;
+  max-width: none;
+  transform: translateX(-50%);
+  pointer-events: none;
+  user-select: none;
+  filter: saturate(1.15);
+  mix-blend-mode: screen;
+}
+
+.hero,
+.sectionTitle,
+.field,
+.checkField,
+.presets,
+.controls,
+footer { position: relative; z-index: 2; }
+
+/* ---------------------------------------------------------------------
+   Header
+--------------------------------------------------------------------- */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--brand-metal) 22%, var(--accent-3) 50%, var(--brand-metal) 78%, transparent);
+  opacity: 0.6;
+}
+
+.hero::before {
+  content: "◆";
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  transform: translateX(-50%);
+  font-size: 7px;
+  color: var(--accent-3);
+  text-shadow: 0 0 6px var(--glow);
+}
+
+/* Crest is now a full-width banner: this is the "more visible" fix — a
+   wide, bold logo strip instead of a small mark squeezed next to the
+   title, so the brand is unmistakable the instant the popup opens. */
+.crestBanner {
+  display: block;
+  width: 100%;
+  max-height: 88px;
+  object-fit: contain;
+  object-position: center;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.65)) drop-shadow(0 0 16px var(--glow));
+}
+
+.heroTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+}
+
+/* min-width: 0 is load-bearing here: without it, a flex item sized by its
+   text content can refuse to shrink below that content's natural width
+   and overflow into the sibling next to it -- which is exactly what was
+   happening to the power switch before this fix. */
+.heroText {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 70%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+h1 {
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 22px;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+  font-weight: 800;
+  background: linear-gradient(95deg, #fff 10%, var(--accent), var(--accent-2) 85%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+h2 {
+  margin: 0;
+  font-size: 11.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+/* Power switch */
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 56px;
+  height: 32px;
+  flex: 0 0 auto;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.slider {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
+  transition: background 0.22s ease, box-shadow 0.22s ease;
+}
+
+.slider::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(155deg, #fff, #dcdcdc);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: transform 0.22s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.switch input:checked + .slider {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.3), 0 0 22px var(--glow);
+}
+
+.switch input:checked + .slider::after { transform: translateX(24px); }
+
+/* ---------------------------------------------------------------------
+   Status bar — small live indicator dot reinforces "this is a running
+   process," not just a label.
+--------------------------------------------------------------------- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 13px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.status.ok {
+  color: #d8ffe9;
+  background: rgba(46, 204, 113, 0.14);
+  border-color: rgba(60, 232, 138, 0.32);
+}
+.status.ok::before {
+  background: #3ce88a;
+  box-shadow: 0 0 0 3px rgba(60, 232, 138, 0.22), 0 0 10px rgba(60, 232, 138, 0.7);
+  animation: statusPulse 2.2s ease-in-out infinite;
+}
+
+.status.warn {
+  color: #ffefc7;
+  background: rgba(255, 176, 32, 0.13);
+  border-color: rgba(255, 190, 60, 0.3);
+}
+.status.warn::before { background: #ffbe3c; box-shadow: 0 0 8px rgba(255, 190, 60, 0.6); }
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* ---------------------------------------------------------------------
+   Presets
+--------------------------------------------------------------------- */
+
+.presets {
+  position: relative;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.presets::after {
+  content: "◆";
+  position: absolute;
+  left: 50%;
+  bottom: -11px;
+  transform: translateX(-50%);
+  font-size: 7px;
+  color: var(--accent-3);
+  text-shadow: 0 0 6px var(--glow), 0 0 3px var(--bg-1);
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sectionTitle span,
+.hint,
+footer {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.presetGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.preset {
+  position: relative;
+  min-height: 70px;
+  padding: 11px 13px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+  box-shadow:
+    0 12px 26px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -10px 16px rgba(0, 0, 0, 0.22);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease, border-color 0.16s ease;
+}
+
+.preset::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 0 35%, rgba(255, 255, 255, 0.14) 48%, transparent 62%);
+  transform: translateX(-115%);
+  transition: transform 0.4s ease;
+}
+
+.preset strong,
+.preset small { display: block; position: relative; z-index: 1; }
+
+.preset strong {
+  font-size: 16px;
+  letter-spacing: -0.03em;
+}
+
+.preset small {
+  margin-top: 3px;
+  opacity: 0.86;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.preset:hover { transform: translateY(-1px); filter: saturate(1.15) brightness(1.03); }
+.preset:hover::before { transform: translateX(115%); }
+.preset:active { transform: translateY(1px) scale(0.99); }
+
+.preset.royal { background: linear-gradient(135deg, #051810, #0a3b2b, #3ce88a); }
+.preset.lord { background: linear-gradient(135deg, #180e00, #2e1a00, #ffb400); }
+.preset.ultraQuetta { background: linear-gradient(135deg, #001a26, #003f57, #12c8ea); }
+.preset.apex { background: linear-gradient(135deg, #1a0202, #3d0808, #ff3b3b); }
+
+.preset.active,
+.preset[aria-pressed="true"] {
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.16),
+    0 0 30px var(--glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -10px 16px rgba(0, 0, 0, 0.18);
+}
+
+.preset.active strong::after,
+.preset[aria-pressed="true"] strong::after {
+  content: "  ✓";
+  font-weight: 900;
+}
+
+.preset.royal.active,
+.preset.royal[aria-pressed="true"] {
+  color: #032417;
+  background: linear-gradient(135deg, #3ce88a, #17d9c4);
+}
+
+.preset.lord.active,
+.preset.lord[aria-pressed="true"] {
+  color: #2b1c00;
+  background: linear-gradient(135deg, #ffd94d, #ff9d1f);
+}
+
+.preset.ultraQuetta.active,
+.preset.ultraQuetta[aria-pressed="true"] {
+  color: #00222f;
+  background: linear-gradient(135deg, #34e3ff, #12c8ea);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.2),
+    0 0 26px rgba(52, 227, 255, 0.7),
+    0 0 44px rgba(52, 227, 255, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -10px 16px rgba(0, 0, 0, 0.12);
+}
+
+.preset.apex.active,
+.preset.apex[aria-pressed="true"] {
+  color: #2b0000;
+  background: linear-gradient(135deg, #ff6a5a, #ff3b3b);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.2),
+    0 0 26px rgba(255, 59, 59, 0.7),
+    0 0 44px rgba(255, 59, 59, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -10px 16px rgba(0, 0, 0, 0.12);
+}
+
+.hint { margin: 10px 0 0; line-height: 1.4; }
+
+/* ---------------------------------------------------------------------
+   Control list + section micro-labels
+   ------------------------------------------------------------------
+   The 22 sliders below are grouped into five logical stages purely
+   through CSS (no HTML changes): each label is generated content
+   anchored to the first control of its group via :has(), matching the
+   existing .eyebrow visual language used in the header. If a control
+   is ever reordered in the HTML, only the label position would need
+   revisiting -- nothing here can break functionality.
+--------------------------------------------------------------------- */
+
+.controls {
+  display: grid;
+  gap: 8px;
+  max-height: 390px;
+  overflow-y: auto;
+  padding-right: 8px;
+  padding-top: 2px;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.controls::-webkit-scrollbar { width: 6px; }
+.controls::-webkit-scrollbar-track { background: transparent; }
+.controls::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 6px; }
+.controls::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 40%, var(--line-strong)); }
+
+.field:has(#gainDb)::before,
+.field:has(#drive)::before,
+.field:has(#presenceDb)::before,
+.checkField:has(#sustain)::before,
+.field:has(#reverbDelay)::before {
+  display: block;
+  margin: 6px 0 2px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.85;
+}
+.field:has(#gainDb)::before { content: "◆ Gain & Loudness"; }
+.field:has(#drive)::before { content: "◆ Drive & Dynamics"; }
+.field:has(#presenceDb)::before { content: "◆ Equalizer"; }
+.checkField:has(#sustain)::before { content: "◆ Locks & Sustain"; }
+.field:has(#reverbDelay)::before { content: "◆ Ambience & Timing"; }
+
+/* Group labels sit above their field's own box, so give those fields a
+   touch of extra top margin to visually separate them from the
+   previous group instead of the label crowding the box above it. */
+.field:has(#gainDb),
+.field:has(#drive),
+.field:has(#presenceDb),
+.checkField:has(#sustain),
+.field:has(#reverbDelay) { margin-top: 10px; }
+
+.checkField {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.checkField:hover { border-color: var(--line-strong); }
+
+/* Custom mini toggle -- same "lock/switch" language as the header power
+   switch, at checkbox scale, so every on/off control in the console
+   reads as one consistent control family. */
+.checkField input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 19px;
+  margin: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+.checkField input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #eee;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.4);
+  transition: transform 0.18s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.checkField input[type="checkbox"]:checked {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 12px var(--glow);
+}
+.checkField input[type="checkbox"]:checked::after { transform: translateX(13px); background: #fff; }
+
+/* ---------------------------------------------------------------------
+   Fields & the fader-style range inputs
+--------------------------------------------------------------------- */
+
+.field {
+  display: grid;
+  grid-template-columns: 1fr 100px;
+  gap: 8px 10px;
+  align-items: center;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  transition: border-color 0.15s ease;
+}
+.field:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+
+.field label {
+  grid-column: 1 / -1;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+}
+
+.field em {
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+/* The fader: a recessed track with faint tick marks, filled up to the
+   slider's live value (--fill is set by popup.js on load and on every
+   input event) and a distinct cap-style thumb with a grip detail. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  --fill: 0%;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 5px;
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent 0, transparent calc(10% - 1px), rgba(255, 255, 255, 0.16) calc(10% - 1px), rgba(255, 255, 255, 0.16) 10%
+    ),
+    linear-gradient(to right, var(--accent) var(--fill), transparent var(--fill)),
+    var(--well);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.55), inset 0 0 0 1px var(--line);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 22px;
+  margin-top: -7px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #fdfdfd, #cfcfd4);
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 10px var(--glow);
+  cursor: pointer;
+}
+
+input[type="range"]:hover::-webkit-slider-thumb { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 14px var(--glow); }
+input[type="range"]:active::-webkit-slider-thumb { background: linear-gradient(180deg, #fff, #d8d8dc); }
+
+input[type="range"]::-moz-range-track {
+  height: 8px;
+  border-radius: 5px;
+  background: var(--well);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.55);
+}
+input[type="range"]::-moz-range-progress {
+  height: 8px;
+  border-radius: 5px 0 0 5px;
+  background: var(--accent);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 22px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #fdfdfd, #cfcfd4);
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 10px var(--glow);
+  cursor: pointer;
+}
+
+/* LCD-style numeric readout: monospace + tabular figures reads as an
+   instrument display, and makes 22 different value formats (dB, x, ms,
+   s) still line up cleanly along their decimal points. */
+output {
+  min-width: 100px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: var(--well);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.6), inset 0 0 0 1px var(--line);
+  text-align: right;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--mono);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--mono) 55%, transparent);
+}
+
+/* ---------------------------------------------------------------------
+   Footer
+--------------------------------------------------------------------- */
+
+footer {
+  margin-top: 13px;
+  padding: 11px 12px;
+  line-height: 1.4;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+}
+
+footer strong { color: var(--accent); text-shadow: 0 0 8px var(--glow); }
+
+/* ---------------------------------------------------------------------
+   Accessibility & motion
+--------------------------------------------------------------------- */
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .field { grid-template-columns: 1fr 88px; }
+  output { min-width: 88px; font-size: 11px; }
+}

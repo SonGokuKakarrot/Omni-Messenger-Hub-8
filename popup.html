@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Omni Messenger Hub</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="panel">
+    <img class="brandWatermark" src="brand/murgi-kheko-watermark.png" alt="" aria-hidden="true" />
+
+    <section class="hero" aria-label="Extension header">
+      <img class="crestBanner" src="brand/murgi-kheko-crest.png" alt="Murgi Kheko Voice Gang" />
+      <div class="heroTitleRow">
+        <div class="heroText">
+          <p class="eyebrow">Murgi Kheko Voice Gang</p>
+          <h1>Omni Messenger Hub</h1>
+        </div>
+        <label class="switch" title="Enable or disable mic processing">
+          <input id="enabled" type="checkbox" aria-label="Enabled" />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </section>
+
+    <div id="hookStatus" class="status">⏳ Hook status: checking Facebook, Messenger, or Instagram tab...</div>
+
+    <section class="presets" aria-label="Lord Modes">
+      <div class="sectionTitle">
+        <h2>Lord Modes</h2>
+        <span>tap to apply</span>
+      </div>
+      <div class="presetGrid">
+        <button id="royalPreset" class="preset royal" data-preset="royal" type="button" aria-pressed="false">
+          <strong>Royal Clear</strong>
+          <small>clean loud calls</small>
+        </button>
+        <button id="lordPreset" class="preset lord" data-preset="lord" type="button" aria-pressed="false">
+          <strong>Lord V4</strong>
+          <small>200000x raw-lock dominance</small>
+        </button>
+        <button id="ultraQuettaPreset" class="preset ultraQuetta" data-preset="ultraQuetta" type="button" aria-pressed="false">
+          <strong>🔊 Ultra Quetta MAX</strong>
+          <small>500000x browser-call max</small>
+        </button>
+        <button id="apexPreset" class="preset apex" data-preset="apex" type="button" aria-pressed="false">
+          <strong>⚡ Apex Overdrive</strong>
+          <small>max perceived loudness, tightest hold</small>
+        </button>
+      </div>
+      <p class="hint">If Facebook, Messenger, or Instagram crackles or clips, use Royal Clear or lower Gain, Loudness, Drive, or Sustain Max Gain.</p>
+    </section>
+
+    <section class="controls" aria-label="Mic boost controls">
+      <div class="field"><label for="gainDb">Gain <em>dB / multiplier</em></label><input id="gainDb" type="range" min="0" max="140" step="0.01" value="128.0" /><output id="gainDbVal"></output></div>
+      <div class="field"><label for="loudness">Loudness Trim</label><input id="loudness" type="range" min="0.5" max="500000" step="0.1" value="1.6" /><output id="loudnessVal"></output></div>
+      <div class="field"><label for="maxBoost">Boost ceiling</label><input id="maxBoost" type="range" min="1" max="500000" step="1" value="500000" /><output id="maxBoostVal"></output></div>
+      <div class="field"><label for="drive">Saturation Drive</label><input id="drive" type="range" min="0" max="20" step="0.01" value="5.0" /><output id="driveVal"></output></div>
+      <div class="field"><label for="saturationCurveIntensity">Saturation Intensity</label><input id="saturationCurveIntensity" type="range" min="0.5" max="6" step="0.1" value="4.0" /><output id="saturationCurveIntensityVal"></output></div>
+      <div class="field"><label for="thresholdDb">Compressor Threshold <em>dB</em></label><input id="thresholdDb" type="range" min="-100" max="0" value="-82" /><output id="thresholdDbVal"></output></div>
+      <div class="field"><label for="knee">Compressor Knee <em>dB</em></label><input id="knee" type="range" min="0" max="40" step="0.5" value="20" /><output id="kneeVal"></output></div>
+      <div class="field"><label for="ratio">Compressor Ratio</label><input id="ratio" type="range" min="1" max="20" step="0.5" value="20" /><output id="ratioVal"></output></div>
+      <div class="field"><label for="attack">Compressor Attack <em>s</em></label><input id="attack" type="range" min="0.00001" max="1" step="0.00001" value="0.00003" /><output id="attackVal"></output></div>
+      <div class="field"><label for="release">Compressor Release <em>s</em></label><input id="release" type="range" min="0.01" max="1" step="0.001" value="0.016" /><output id="releaseVal"></output></div>
+      <div class="field"><label for="limiterDb">Limiter Ceiling <em>dB</em></label><input id="limiterDb" type="range" min="-24" max="-0.1" step="0.1" value="-0.1" /><output id="limiterDbVal"></output></div>
+      <div class="field"><label for="presenceDb">Presence EQ <em>dB</em></label><input id="presenceDb" type="range" min="-60" max="60" value="42" /><output id="presenceDbVal"></output></div>
+      <div class="field"><label for="presencePeakDb">5kHz Peak <em>dB</em></label><input id="presencePeakDb" type="range" min="-60" max="60" value="40" /><output id="presencePeakDbVal"></output></div>
+      <div class="field"><label for="presencePeakFreq">5kHz Peak Freq</label><input id="presencePeakFreq" type="range" min="1000" max="12000" step="100" value="4800" /><output id="presencePeakFreqVal"></output></div>
+      <div class="field"><label for="presencePeakQ">5kHz Peak Q</label><input id="presencePeakQ" type="range" min="0.5" max="10" step="0.1" value="3.0" /><output id="presencePeakQVal"></output></div>
+      <div class="field"><label for="lowShelfDb">Bass EQ <em>dB</em></label><input id="lowShelfDb" type="range" min="-60" max="60" value="24" /><output id="lowShelfDbVal"></output></div>
+      <div class="field"><label for="highShelfDb">Treble EQ <em>dB</em></label><input id="highShelfDb" type="range" min="-60" max="60" value="32" /><output id="highShelfDbVal"></output></div>
+      <label class="checkField" for="sustain"><input id="sustain" type="checkbox" checked /> Anti-duck sustain lock</label>
+      <label class="checkField" for="forceRawMic"><input id="forceRawMic" type="checkbox" checked /> Raw mic constraint lock</label>
+      <label class="checkField" for="reverbEnabled"><input id="reverbEnabled" type="checkbox" checked /> Reverb keep-alive layer</label>
+      <label class="checkField" for="keepAlive"><input id="keepAlive" type="checkbox" checked /> Mic activity keep-alive</label>
+      <div class="field"><label for="sustainTargetDb">Sustain Target <em>dB</em></label><input id="sustainTargetDb" type="range" min="-24" max="-1" step="1" value="-6" /><output id="sustainTargetDbVal"></output></div>
+      <div class="field"><label for="sustainMaxGain">Sustain Max Gain</label><input id="sustainMaxGain" type="range" min="1" max="300" step="1" value="240" /><output id="sustainMaxGainVal"></output></div>
+      <div class="field"><label for="reverbDelay">Reverb Delay <em>s</em></label><input id="reverbDelay" type="range" min="0.01" max="0.35" step="0.005" value="0.07" /><output id="reverbDelayVal"></output></div>
+      <div class="field"><label for="reverbFeedback">Reverb Feedback</label><input id="reverbFeedback" type="range" min="0" max="0.75" step="0.01" value="0.58" /><output id="reverbFeedbackVal"></output></div>
+      <div class="field"><label for="reverbWet">Reverb Wet Mix</label><input id="reverbWet" type="range" min="0" max="0.6" step="0.01" value="0.36" /><output id="reverbWetVal"></output></div>
+      <div class="field"><label for="keepAliveGain">Keep-Alive Floor</label><input id="keepAliveGain" type="range" min="0" max="0.006" step="0.00005" value="0.0035" /><output id="keepAliveGainVal"></output></div>
+      <div class="field"><label for="senderRefreshMs">Sender Refresh <em>ms</em></label><input id="senderRefreshMs" type="range" min="150" max="1500" step="50" value="250" /><output id="senderRefreshMsVal"></output></div>
+    </section>
+
+    <footer>🔊 <strong>Ultra Quetta MAX (500000x)</strong>: Maximum Facebook, Messenger, and Instagram browser-call loudness. If distortion occurs, lower Drive, Gain, or Saturation Intensity. Always test on a call. Best with signed extension in Quetta browser.</footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
