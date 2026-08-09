@@ -34,6 +34,7 @@
     keepAlive: true,
     keepAliveGain: 0.0035,
     senderRefreshMs: 250,
+    desktopCallSafeMode: true,
     isAndroidQuetta: /Android|Quetta/i.test(navigator.userAgent)
   };
   const MSG_CFG = 'MIC_MAXIMIZER_CONFIG';
@@ -52,6 +53,7 @@
     pcAuditTimers: new WeakMap(),
     senderRecords: new Set(),
     senderBySender: new WeakMap(),
+    streamBySender: new WeakMap(),
     refreshingSenders: new WeakSet(),
     lastRefreshAt: new WeakMap(),
     recoverTimers: new Set(),
@@ -60,7 +62,8 @@
     lastAudioConstraints: { audio: true },
     lateJoinDetected: false,
     aggressiveRecoveryActive: false,
-    healthCheckTimer: null
+    healthCheckTimer: null,
+    callModeActive: false
   };
   const clamp = (value, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Number(value) : min));
   const dbToLinear = (db) => Math.pow(10, db / 20);
@@ -117,6 +120,30 @@
     merged.keepAlive = Boolean(merged.keepAlive);
     merged.keepAliveGain = clamp(merged.keepAliveGain, 0, 0.006);
     merged.senderRefreshMs = state.aggressiveRecoveryActive ? 150 : clamp(merged.senderRefreshMs, 150, 1500);
+    merged.desktopCallSafeMode = merged.desktopCallSafeMode !== false;
+
+    // Desktop Meta WebRTC calls run a second server/browser voice pipeline
+    // after this extension. The Android profile's extreme clipped/reverbed
+    // signal is fine for Quetta and for desktop voice-message recording, but
+    // on desktop calls it can be classified as invalid/noise and transmitted
+    // as silence. When a PeerConnection exists on desktop, keep the extension
+    // loud but inside a speech-shaped range that WebRTC reliably forwards.
+    if (merged.desktopCallSafeMode && !merged.isAndroidQuetta && state.callModeActive) {
+      merged.gainDb = Math.min(merged.gainDb, 86);
+      merged.loudness = Math.min(merged.loudness, 3.5);
+      merged.drive = Math.min(merged.drive, 2.4);
+      merged.saturationCurveIntensity = Math.min(merged.saturationCurveIntensity, 2.4);
+      merged.lowShelfDb = Math.min(merged.lowShelfDb, 18);
+      merged.presenceDb = Math.min(merged.presenceDb, 24);
+      merged.presencePeakDb = Math.min(merged.presencePeakDb, 18);
+      merged.highShelfDb = Math.min(merged.highShelfDb, 24);
+      merged.thresholdDb = Math.max(merged.thresholdDb, -72);
+      merged.sustainTargetDb = Math.min(merged.sustainTargetDb, -6);
+      merged.sustainMaxGain = Math.min(merged.sustainMaxGain, 120);
+      merged.reverbWet = Math.min(merged.reverbWet, 0.12);
+      merged.reverbFeedback = Math.min(merged.reverbFeedback, 0.25);
+      merged.keepAliveGain = Math.min(merged.keepAliveGain, 0.0012);
+    }
     return merged;
   }
 
@@ -486,6 +513,18 @@
     return new MediaStream(originalStream.getTracks().map((track) => (track === rawTrack ? processedTrack : track)));
   }
 
+  function rememberSenderStreams(sender, streams = []) {
+    if (!sender || !streams.length) return;
+    state.streamBySender.set(sender, streams);
+    if (typeof sender.setStreams === 'function') {
+      try { sender.setStreams(...streams); } catch (_) {}
+    }
+  }
+
+  function isDesktopBrowser() {
+    return !cfg().isAndroidQuetta;
+  }
+
   function liveAudioTrack(stream) {
     if (!stream || typeof stream.getAudioTracks !== 'function') return null;
     return stream.getAudioTracks().find((track) => track.readyState !== 'ended') || null;
@@ -524,7 +563,15 @@
 
   function cloneForSender(track) {
     const liveTrack = track?.readyState === 'ended' ? rebuildProcessedTrack(track) : track;
-    if (!liveTrack || liveTrack.readyState === 'ended' || typeof liveTrack.clone !== 'function') return liveTrack;
+    if (!liveTrack || liveTrack.readyState === 'ended') return liveTrack;
+
+    // Desktop Meta calling pages are more sensitive to sender-track churn than
+    // Android/Quetta. Reusing the destination track preserves the WebAudio clock
+    // and avoids a Chrome desktop failure mode where cloned destination tracks
+    // can be accepted by replaceTrack() but transmit silence. Android keeps the
+    // clone path because it already works well there and isolates each sender.
+    if (isDesktopBrowser() || typeof liveTrack.clone !== 'function') return liveTrack;
+
     try {
       const clone = liveTrack.clone();
       state.processedTracks.add(clone);
@@ -646,6 +693,11 @@
     const closed = ['closed', 'failed'].includes(pc.connectionState || pc.iceConnectionState || '');
     if (closed) {
       state.peerConnections.delete(pc);
+      if (!state.peerConnections.size) {
+        state.callModeActive = false;
+        state.config = cfg(state.config);
+        updateAllPipelines(state.config);
+      }
       return;
     }
 
@@ -662,6 +714,11 @@
   function rememberPeerConnection(pc) {
     if (!pc || state.peerConnections.has(pc)) return;
     state.peerConnections.add(pc);
+    if (!state.callModeActive) {
+      state.callModeActive = true;
+      state.config = cfg(state.config);
+      updateAllPipelines(state.config);
+    }
     diag(`new RTCPeerConnection registered (${state.peerConnections.size} total tracked)`);
     
     // LATE JOIN DETECTION: PC joins after existing connections
@@ -677,7 +734,14 @@
         pc.addEventListener(type, audit, { passive: true });
       });
       pc.addEventListener('connectionstatechange', () => {
-        if (['closed', 'failed'].includes(pc.connectionState)) state.peerConnections.delete(pc);
+        if (['closed', 'failed'].includes(pc.connectionState)) {
+          state.peerConnections.delete(pc);
+          if (!state.peerConnections.size) {
+            state.callModeActive = false;
+            state.config = cfg(state.config);
+            updateAllPipelines(state.config);
+          }
+        }
       });
     }
   }
@@ -742,6 +806,7 @@
       const replacement = track?.readyState === 'ended' ? await reacquireProcessedTrackForSender() : processAudioTrack(track, true);
       if (!replacement) return null;
       await sender.replaceTrack(replacement);
+      rememberSenderStreams(sender, state.streamBySender.get(sender) || []);
       tuneAudioSender(sender);
       rememberSender(sender, replacement);
       watchSenderTrack(sender, replacement);
@@ -875,6 +940,7 @@
               ? streams.map((stream) => processedStreamFor(stream, track, processedTrack))
               : [new MediaStream([processedTrack])];
             const sender = originalAddTrack.call(this, processedTrack, ...patchedStreams);
+            rememberSenderStreams(sender, patchedStreams);
             tuneAudioSender(sender);
             rememberSender(sender, processedTrack, this);
             if (typeof sender?.replaceTrack === 'function') watchSenderTrack(sender, processedTrack);
@@ -908,6 +974,7 @@
               ? { ...init, streams: init.streams.map((stream) => processedStreamFor(stream, trackOrKind, processedTrack)) }
               : init;
             const transceiver = originalAddTransceiver.call(this, processedTrack, patchedInit);
+            if (patchedInit?.streams) rememberSenderStreams(transceiver?.sender, patchedInit.streams);
             tuneAudioSender(transceiver?.sender);
             rememberSender(transceiver?.sender, processedTrack, this);
             if (typeof transceiver?.sender?.replaceTrack === 'function') watchSenderTrack(transceiver.sender, processedTrack);
@@ -993,6 +1060,12 @@
             const record = rememberSender(this, this.track || null);
             if (record) record.kind = 'audio';
             queueSenderRefresh(this, this.track || null);
+            // Meta desktop call pages may briefly call replaceTrack(null) while
+            // renegotiating devices/transceivers. Passing that null through can
+            // leave the local sender permanently silent even after our recovery
+            // runs. Keep the current processed microphone attached and let an
+            // explicit user mute continue to flow through track.enabled instead.
+            return Promise.resolve();
           }
           const nextTrack = shouldProcess && track?.kind === 'audio' ? processAudioTrack(track, true) : track;
           const result = originalReplaceTrack.call(this, nextTrack);
@@ -1000,6 +1073,7 @@
             rememberSender(this, nextTrack);
             Promise.resolve(result).then(() => {
               tuneAudioSender(this);
+              rememberSenderStreams(this, state.streamBySender.get(this) || []);
               watchSenderTrack(this, nextTrack);
             }).catch(() => {});
           }
