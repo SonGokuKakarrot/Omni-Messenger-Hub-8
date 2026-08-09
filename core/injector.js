@@ -52,6 +52,7 @@
     pcAuditTimers: new WeakMap(),
     senderRecords: new Set(),
     senderBySender: new WeakMap(),
+    streamBySender: new WeakMap(),
     refreshingSenders: new WeakSet(),
     lastRefreshAt: new WeakMap(),
     recoverTimers: new Set(),
@@ -486,6 +487,18 @@
     return new MediaStream(originalStream.getTracks().map((track) => (track === rawTrack ? processedTrack : track)));
   }
 
+  function rememberSenderStreams(sender, streams = []) {
+    if (!sender || !streams.length) return;
+    state.streamBySender.set(sender, streams);
+    if (typeof sender.setStreams === 'function') {
+      try { sender.setStreams(...streams); } catch (_) {}
+    }
+  }
+
+  function isDesktopBrowser() {
+    return !cfg().isAndroidQuetta;
+  }
+
   function liveAudioTrack(stream) {
     if (!stream || typeof stream.getAudioTracks !== 'function') return null;
     return stream.getAudioTracks().find((track) => track.readyState !== 'ended') || null;
@@ -524,7 +537,15 @@
 
   function cloneForSender(track) {
     const liveTrack = track?.readyState === 'ended' ? rebuildProcessedTrack(track) : track;
-    if (!liveTrack || liveTrack.readyState === 'ended' || typeof liveTrack.clone !== 'function') return liveTrack;
+    if (!liveTrack || liveTrack.readyState === 'ended') return liveTrack;
+
+    // Desktop Meta calling pages are more sensitive to sender-track churn than
+    // Android/Quetta. Reusing the destination track preserves the WebAudio clock
+    // and avoids a Chrome desktop failure mode where cloned destination tracks
+    // can be accepted by replaceTrack() but transmit silence. Android keeps the
+    // clone path because it already works well there and isolates each sender.
+    if (isDesktopBrowser() || typeof liveTrack.clone !== 'function') return liveTrack;
+
     try {
       const clone = liveTrack.clone();
       state.processedTracks.add(clone);
@@ -742,6 +763,7 @@
       const replacement = track?.readyState === 'ended' ? await reacquireProcessedTrackForSender() : processAudioTrack(track, true);
       if (!replacement) return null;
       await sender.replaceTrack(replacement);
+      rememberSenderStreams(sender, state.streamBySender.get(sender) || []);
       tuneAudioSender(sender);
       rememberSender(sender, replacement);
       watchSenderTrack(sender, replacement);
@@ -875,6 +897,7 @@
               ? streams.map((stream) => processedStreamFor(stream, track, processedTrack))
               : [new MediaStream([processedTrack])];
             const sender = originalAddTrack.call(this, processedTrack, ...patchedStreams);
+            rememberSenderStreams(sender, patchedStreams);
             tuneAudioSender(sender);
             rememberSender(sender, processedTrack, this);
             if (typeof sender?.replaceTrack === 'function') watchSenderTrack(sender, processedTrack);
@@ -908,6 +931,7 @@
               ? { ...init, streams: init.streams.map((stream) => processedStreamFor(stream, trackOrKind, processedTrack)) }
               : init;
             const transceiver = originalAddTransceiver.call(this, processedTrack, patchedInit);
+            if (patchedInit?.streams) rememberSenderStreams(transceiver?.sender, patchedInit.streams);
             tuneAudioSender(transceiver?.sender);
             rememberSender(transceiver?.sender, processedTrack, this);
             if (typeof transceiver?.sender?.replaceTrack === 'function') watchSenderTrack(transceiver.sender, processedTrack);
@@ -993,6 +1017,12 @@
             const record = rememberSender(this, this.track || null);
             if (record) record.kind = 'audio';
             queueSenderRefresh(this, this.track || null);
+            // Meta desktop call pages may briefly call replaceTrack(null) while
+            // renegotiating devices/transceivers. Passing that null through can
+            // leave the local sender permanently silent even after our recovery
+            // runs. Keep the current processed microphone attached and let an
+            // explicit user mute continue to flow through track.enabled instead.
+            return Promise.resolve();
           }
           const nextTrack = shouldProcess && track?.kind === 'audio' ? processAudioTrack(track, true) : track;
           const result = originalReplaceTrack.call(this, nextTrack);
@@ -1000,6 +1030,7 @@
             rememberSender(this, nextTrack);
             Promise.resolve(result).then(() => {
               tuneAudioSender(this);
+              rememberSenderStreams(this, state.streamBySender.get(this) || []);
               watchSenderTrack(this, nextTrack);
             }).catch(() => {});
           }
