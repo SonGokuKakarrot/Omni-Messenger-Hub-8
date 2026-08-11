@@ -38,7 +38,6 @@
     isAndroidQuetta: /Android|Quetta/i.test(navigator.userAgent)
   };
   const MSG_CFG = 'MIC_MAXIMIZER_CONFIG';
-  const AUDIO_SEND_MAX_BITRATE = 640000;
   const state = {
     config: { ...DEFAULTS },
     origMD: null,
@@ -78,6 +77,14 @@
     if (now - lastLogAt < 2000) return;
     lastLogAt = now;
     try { console.log(`[Omni] ${message}`); } catch (_) { /* console unavailable */ }
+  }
+
+  function describeMediaError(error) {
+    if (!error) return 'unknown media error';
+    const parts = [error.name || error.constructor?.name || 'Error'];
+    if (error.message) parts.push(error.message);
+    if (error.constraint) parts.push(`constraint=${error.constraint}`);
+    return parts.join(': ');
   }
 
   function cfg(input = state.config) {
@@ -609,68 +616,6 @@
     return forSender ? cloneForSender(processedTrack) : processedTrack;
   }
 
-  function enhanceAudioSdp(sdp) {
-    if (typeof sdp !== 'string' || !sdp.includes('m=audio')) return sdp;
-    const bitrateBps = AUDIO_SEND_MAX_BITRATE;
-    const bitrateKbps = Math.round(bitrateBps / 1000);
-
-    let next = sdp.replace(/a=fmtp:111 ([^\r\n]*)/g, (line, params) => {
-      const additions = [`maxaveragebitrate=${bitrateBps}`, 'stereo=0', 'sprop-stereo=0', 'useinbandfec=1', 'usedtx=0'];
-      const merged = params || '';
-      const suffix = additions.filter((item) => !new RegExp(`(^|;)\\s*${item.split('=')[0]}=`, 'i').test(merged));
-      return suffix.length ? `${line};${suffix.join(';')}` : line;
-    });
-
-    // The bitrate lines below (b=AS / b=TIAS) belong to a single media
-    // section (audio OR video) and must never be rewritten with a bare
-    // global regex: a call that also negotiates video has its own
-    // b=AS line in the video m= section, and a global replace would
-    // overwrite that too, silently degrading video quality. Scope the
-    // rewrite to the lines between "m=audio" and the next "m=" line only.
-    const lines = next.split(/\r\n/);
-    let audioStart = -1;
-    let audioEnd = lines.length;
-    for (let i = 0; i < lines.length; i += 1) {
-      if (lines[i].indexOf('m=audio') === 0) {
-        audioStart = i;
-      } else if (audioStart !== -1 && i > audioStart && lines[i].indexOf('m=') === 0) {
-        audioEnd = i;
-        break;
-      }
-    }
-    if (audioStart === -1) return next;
-
-    for (let i = audioStart; i < audioEnd; i += 1) {
-      if (/^b=AS:\d+/.test(lines[i])) lines[i] = `b=AS:${bitrateKbps}`;
-      else if (/^b=TIAS:\d+/.test(lines[i])) lines[i] = `b=TIAS:${bitrateBps}`;
-    }
-    let hasAS = false;
-    let hasTIAS = false;
-    let cLineIndex = -1;
-    for (let i = audioStart; i < audioEnd; i += 1) {
-      if (lines[i].indexOf(`b=AS:${bitrateKbps}`) === 0) hasAS = true;
-      if (lines[i].indexOf(`b=TIAS:${bitrateBps}`) === 0) hasTIAS = true;
-      if (cLineIndex === -1 && lines[i].indexOf('c=IN') === 0) cLineIndex = i;
-    }
-    if (!hasAS || !hasTIAS) {
-      const insertAt = cLineIndex !== -1 ? cLineIndex + 1 : audioStart + 1;
-      const insertion = [];
-      if (!hasAS) insertion.push(`b=AS:${bitrateKbps}`);
-      if (!hasTIAS) insertion.push(`b=TIAS:${bitrateBps}`);
-      lines.splice(insertAt, 0, ...insertion);
-    }
-    return lines.join('\r\n');
-  }
-
-  function cloneDescriptionWithSdp(desc, sdp) {
-    if (!desc || typeof desc !== 'object' || !sdp || sdp === desc.sdp) return desc;
-    try {
-      return new RTCSessionDescription({ type: desc.type, sdp });
-    } catch (_) {
-      try { return { ...desc, sdp }; } catch (_) { return desc; }
-    }
-  }
-
   function tuneAudioSender(sender) {
     if (!sender || typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') return;
     try {
@@ -678,11 +623,11 @@
       const encodings = Array.isArray(params.encodings) && params.encodings.length ? params.encodings : [{}];
       params.encodings = encodings.map((encoding) => ({
         ...encoding,
-        active: encoding.active !== false,
+        // Preserve Meta's active/mute state and only request a higher audio
+        // bitrate. Non-standard priority fields and forced active=true can make
+        // desktop browser behavior diverge from the page's call state.
         dtx: false,
-        maxBitrate: Math.max(Number(encoding.maxBitrate) || 0, 640000),
-        networkPriority: 'high',
-        priority: 'high'
+        maxBitrate: Math.max(Number(encoding.maxBitrate) || 0, 640000)
       }));
       sender.setParameters(params).catch(() => {});
     } catch (_) {}
@@ -919,7 +864,8 @@
       const track = sender?.track || record.track;
       const isAudioRecord = track?.kind === 'audio' || record.kind === 'audio';
       if (!sender || !isAudioRecord) continue;
-      if (!track || trackNeedsRefresh(track)) queueSenderRefresh(sender, track);
+      if (!track) continue;
+      if (trackNeedsRefresh(track)) queueSenderRefresh(sender, track);
       else {
         tuneAudioSender(sender);
         watchSenderTrack(sender, track);
@@ -982,10 +928,15 @@
           }
           const transceiver = originalAddTransceiver.call(this, trackOrKind, init);
           if (cfg().enabled && trackOrKind === 'audio') {
+            // Do not attach/reacquire a microphone for an empty audio
+            // transceiver. Meta creates receive/sendrecv transceivers before
+            // permission and signaling are complete on desktop; forcing a local
+            // track here can break its negotiated audio/video call setup. The
+            // actual microphone is processed when Meta supplies a real track via
+            // getUserMedia(), addTrack(), or replaceTrack(track).
             const record = rememberSender(transceiver?.sender, transceiver?.sender?.track || null, this);
             if (record) record.kind = 'audio';
             tuneAudioSender(transceiver?.sender);
-            setTimeout(() => queueSenderRefresh(transceiver?.sender, transceiver?.sender?.track || null), 0);
           }
           return transceiver;
         };
@@ -997,7 +948,7 @@
           rememberPeerConnection(this);
           return originalCreateOffer.apply(this, args).then((offer) => {
             schedulePeerConnectionAudit(this, 'createOffer');
-            return cloneDescriptionWithSdp(offer, enhanceAudioSdp(offer?.sdp));
+            return offer;
           });
         };
       }
@@ -1008,7 +959,7 @@
           rememberPeerConnection(this);
           return originalCreateAnswer.apply(this, args).then((answer) => {
             schedulePeerConnectionAudit(this, 'createAnswer');
-            return cloneDescriptionWithSdp(answer, enhanceAudioSdp(answer?.sdp));
+            return answer;
           });
         };
       }
@@ -1017,8 +968,7 @@
       if (typeof originalSetLocalDescription === 'function') {
         PC.prototype.setLocalDescription = function setLocalDescription(desc) {
           rememberPeerConnection(this);
-          const patched = cloneDescriptionWithSdp(desc, enhanceAudioSdp(desc?.sdp));
-          const result = originalSetLocalDescription.call(this, patched);
+          const result = originalSetLocalDescription.call(this, desc);
           Promise.resolve(result).then(() => schedulePeerConnectionAudit(this, 'setLocalDescription')).catch(() => {});
           return result;
         };
@@ -1028,18 +978,10 @@
       if (typeof originalSetRemoteDescription === 'function') {
         PC.prototype.setRemoteDescription = function setRemoteDescription(desc) {
           rememberPeerConnection(this);
-          // Do NOT rewrite the remote party's SDP here. Bitrate/DTX hints
-          // only affect what THIS client sends when applied to a
-          // description this client generates and transmits (offer/
-          // answer, handled below in createOffer/createAnswer/
-          // setLocalDescription) — mutating the description of what the
-          // remote side (or SFU) actually sent doesn't raise our outgoing
-          // bitrate, and risks the browser's negotiation state and the
-          // page's own signaling bookkeeping disagreeing about what was
-          // actually received. Renegotiation — e.g. exactly when another
-          // participant joins an existing call — is the single most
-          // likely moment for any such mismatch to surface, which matches
-          // the reported drop-out timing too closely to risk keeping this.
+          // Keep the remote SDP byte-for-byte. Meta's desktop call stack owns
+          // signaling and SFU negotiation; the extension should observe state
+          // and process local microphone tracks, not mutate remote media
+          // capabilities.
           const result = originalSetRemoteDescription.call(this, desc);
           Promise.resolve(result).then(scheduleRecoveryPasses).catch(() => {});
           return result;
@@ -1059,6 +1001,8 @@
           if (shouldProcess && !track) {
             const record = rememberSender(this, this.track || null);
             if (record) record.kind = 'audio';
+
+
             queueSenderRefresh(this, this.track || null);
             // Meta desktop call pages may briefly call replaceTrack(null) while
             // renegotiating devices/transceivers. Passing that null through can
@@ -1066,6 +1010,7 @@
             // runs. Keep the current processed microphone attached and let an
             // explicit user mute continue to flow through track.enabled instead.
             return Promise.resolve();
+
           }
           const nextTrack = shouldProcess && track?.kind === 'audio' ? processAudioTrack(track, true) : track;
           const result = originalReplaceTrack.call(this, nextTrack);
@@ -1087,8 +1032,14 @@
   async function getStreamWithFallback(orig, constraints, ctx) {
     try {
       return await orig.call(ctx, normalizeConstraints(constraints));
-    } catch (_) {
-      return orig.call(ctx, constraints);
+    } catch (error) {
+      diag(`getUserMedia with raw constraints failed; retrying page constraints (${describeMediaError(error)})`);
+      try {
+        return await orig.call(ctx, constraints);
+      } catch (fallbackError) {
+        diag(`getUserMedia failed (${describeMediaError(fallbackError)})`);
+        throw fallbackError;
+      }
     }
   }
 
@@ -1118,7 +1069,7 @@
 
   patchTrackConstraints();
   // CRITICAL FIX: this call was missing entirely. Every addTrack/
-  // addTransceiver/addStream/replaceTrack/SDP hook, the late-join
+  // addTransceiver/addStream/replaceTrack hook, the late-join
   // detector, and the whole sender-recovery system below are defined but
   // do nothing until this runs. Without it, only the getUserMedia hook
   // was ever active — which explains why audio was loud when a call
