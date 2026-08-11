@@ -62,7 +62,8 @@
     lateJoinDetected: false,
     aggressiveRecoveryActive: false,
     healthCheckTimer: null,
-    callModeActive: false
+    callModeActive: false,
+    recentErrors: [] // capped diagnostics buffer for failures
   };
   const clamp = (value, min, max) => Math.min(max, Math.max(min, Number.isFinite(Number(value)) ? Number(value) : min));
   const dbToLinear = (db) => Math.pow(10, db / 20);
@@ -217,7 +218,10 @@
     if (nodes.reverbWet) setParam(nodes.reverbWet.gain, c.reverbEnabled ? c.reverbWet : 0, ctx);
     if (nodes.keepAliveGain) setParam(nodes.keepAliveGain.gain, c.keepAlive ? c.keepAliveGain : 0, ctx);
     if (nodes.sustain && !c.sustain) setParam(nodes.sustain.gain, 1, ctx);
-    setParam(nodes.limiter.threshold, c.limiterDb, ctx);
+    // Safety clamp: make sure the limiter threshold never exceeds -0.1 dBFS
+    // to keep final ceiling below 0 dBFS even when UI/presets are aggressive.
+    const safeLimiterThreshold = Math.min(c.limiterDb, -0.1);
+    setParam(nodes.limiter.threshold, safeLimiterThreshold, ctx);
   }
 
   function updateAllPipelines(inputConfig = state.config) {
@@ -227,7 +231,24 @@
   function resumePipeline(pipeline) {
     const ctx = pipeline?.ctx;
     if (!ctx || ctx.state === 'closed' || typeof ctx.resume !== 'function') return;
-    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    // Try to resume; if the resume is blocked (suspended until user gesture),
+    // attach a one-shot user-interaction retry so the pipeline becomes active
+    // as soon as the user interacts with the page.
+    if (ctx.state !== 'running') {
+      ctx.resume().catch(() => {
+        try {
+          const retry = () => {
+            ctx.resume().then(() => {
+              diag('AudioContext resumed via user gesture');
+            }).catch(() => {
+              diag('AudioContext resume via gesture failed');
+            });
+            ['pointerdown', 'keydown', 'click'].forEach((ev) => window.removeEventListener(ev, retry));
+          };
+          ['pointerdown', 'keydown', 'click'].forEach((ev) => window.addEventListener(ev, retry, { once: true }));
+        } catch (_) {}
+      });
+    }
   }
 
   function resumeAllPipelines() {
@@ -629,7 +650,12 @@
         dtx: false,
         maxBitrate: Math.max(Number(encoding.maxBitrate) || 0, 640000)
       }));
-      sender.setParameters(params).catch(() => {});
+      sender.setParameters(params).catch((err) => {
+        const msg = `sender.setParameters failed: ${describeMediaError(err)}`;
+        diag(msg);
+        state.recentErrors = (state.recentErrors || []).slice(-19);
+        state.recentErrors.push({ time: Date.now(), message: msg });
+      });
     } catch (_) {}
   }
 
@@ -723,6 +749,9 @@
     }
     if (!record.kind && sender.track?.kind) record.kind = sender.track.kind;
     if (pc) record.pc = pc;
+    // Initialize health counters used by getStats-based checks.
+    if (typeof record.silentCount === 'undefined') record.silentCount = 0;
+    if (typeof record.replaceAttempts === 'undefined') record.replaceAttempts = 0;
     return record;
   }
 
@@ -757,6 +786,29 @@
       watchSenderTrack(sender, replacement);
       return replacement;
     } catch (_) {
+      // Log and implement a small retry/backoff mechanism. This helps with
+      // transient replaceTrack failures during renegotiation.
+      try {
+        const record = state.senderBySender.get(sender);
+        if (record) {
+          record.replaceAttempts = (record.replaceAttempts || 0) + 1;
+          const attempt = record.replaceAttempts;
+          const maxAttempts = 3;
+          const backoffs = [100, 400, 1500];
+          const errMsg = `replaceTrack failed (attempt ${attempt})`;
+          diag(errMsg);
+          state.recentErrors = (state.recentErrors || []).slice(-19);
+          state.recentErrors.push({ time: Date.now(), message: errMsg });
+          if (attempt <= maxAttempts) {
+            const delay = backoffs[Math.min(attempt - 1, backoffs.length - 1)];
+            setTimeout(() => {
+              replaceSenderTrack(sender, track).finally(() => {
+                // if recovery eventually worked, reset counter elsewhere; keep it bounded
+              });
+            }, delay);
+          }
+        }
+      } catch (_) {}
       return null;
     }
   }
@@ -828,6 +880,51 @@
     });
   }
 
+  // ----- Sender stats based health sampling -----
+  // Non-blocking: sample sender.getStats() when available and mark sender
+  // as "silent" if outbound-rtp audio shows zero packets/bytes for consecutive checks.
+  async function checkSenderStats(sender, record) {
+    if (!sender || !record) return;
+    // Feature-detect getStats on the sender or the sender.track via a pc
+    if (typeof sender.getStats !== 'function') return;
+    try {
+      const stats = await sender.getStats();
+      let outbound = null;
+      stats.forEach((report) => {
+        // outbound-rtp rows vary by browser; look for audio outbound rows
+        if (report.type === 'outbound-rtp' && (report.kind === 'audio' || String(report.codecId || '').length > 0 || report.mediaType === 'audio')) {
+          outbound = report;
+        }
+      });
+      if (!outbound) {
+        // No outbound-rtp found — don't treat as failure immediately, but count it
+        record.silentCount = (record.silentCount || 0) + 1;
+      } else {
+        const sent = Number(outbound.bytesSent || outbound.packetsSent || 0);
+        if (sent === 0) {
+          record.silentCount = (record.silentCount || 0) + 1;
+        } else {
+          // healthy
+          record.silentCount = 0;
+        }
+      }
+      // If we've seen two consecutive silent samples, refresh sender immediately.
+      if ((record.silentCount || 0) >= 2) {
+        diag('sender appears silent (no outbound RTP) — triggering immediate refresh');
+        // bypass cooldown for definite-silent condition
+        queueSenderRefresh(sender, record.sender?.track || null);
+        // reset counter to avoid repeated immediate refreshes
+        record.silentCount = 0;
+      }
+    } catch (err) {
+      // don't spam logs — store a small diagnostic and continue
+      const message = `sender.getStats error: ${describeMediaError(err)}`;
+      state.recentErrors = (state.recentErrors || []).slice(-19);
+      state.recentErrors.push({ time: Date.now(), message });
+      diag(message);
+    }
+  }
+
   function reconcileLiveSenders() {
     if (!cfg().enabled) return;
     resumeAllPipelines();
@@ -865,6 +962,11 @@
       const isAudioRecord = track?.kind === 'audio' || record.kind === 'audio';
       if (!sender || !isAudioRecord) continue;
       if (!track) continue;
+      // Start non-blocking stats check for suspicious senders. checkSenderStats
+      // runs asynchronously and will queue an immediate refresh if it detects
+      // a sender that exists but is not transmitting outbound packets.
+      checkSenderStats(sender, record).catch(() => {});
+
       if (trackNeedsRefresh(track)) queueSenderRefresh(sender, track);
       else {
         tuneAudioSender(sender);
