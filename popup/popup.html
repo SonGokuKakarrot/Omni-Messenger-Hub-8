@@ -83,7 +83,16 @@
       <div class="field"><label for="senderRefreshMs">Sender Refresh <em>ms</em></label><input id="senderRefreshMs" type="range" min="150" max="1500" step="50" value="250" /><output id="senderRefreshMsVal"></output></div>
     </section>
 
-    <footer>🔊 <strong>Ultra Quetta MAX (500000x)</strong>: Maximum Facebook, Messenger, and Instagram browser-call loudness. If distortion occurs, lower Drive, Gain, or Saturation Intensity. Always test on a call. Best with signed extension in Quetta browser.</footer>
+    <!-- Devices UI: added to support microphone selection -->
+    <section class="devices" aria-label="Device selection">
+      <div class="sectionTitle"><h2>Devices</h2><span>choose input</span></div>
+      <div class="field">
+        <button id="enumerateDevicesBtn" type="button">Enumerate Microphones</button>
+      </div>
+      <ul id="devicesList" class="devicesList" aria-live="polite"></ul>
+    </section>
+
+    <footer>🔊 <strong>Ultra Quetta MAX (500000x)</strong>: Maximum Facebook, Messenger, and Instagram browser-call loudness. If distortion occurs, lower Drive, Gain, or Saturation Intensity. Always test with a friend.</footer>
   </main>
   <script src="popup.js"></script>
 </body>

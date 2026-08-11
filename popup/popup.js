@@ -360,6 +360,39 @@
     });
 
     await refreshHookStatus();
+
+    // NEW: Setup optional device enumeration UI hook
+    const devicesBtn = document.getElementById('enumerateDevicesBtn');
+    if (devicesBtn) {
+      devicesBtn.addEventListener('click', async () => {
+        const listEl = document.getElementById('devicesList');
+        if (!listEl) return;
+        try {
+          // Ensure permission prompt may be shown by asking for a short getUserMedia
+          await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
+        } catch (_) {}
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          listEl.innerHTML = '';
+          devices.filter(d => d.kind === 'audioinput').forEach((d) => {
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.textContent = d.label || `Microphone (${d.deviceId.slice(0, 6)})`;
+            btn.addEventListener('click', async () => {
+              const cfg = await ensureLiveConfig();
+              cfg.deviceId = d.deviceId;
+              await storageSet('micMaximizerConfig', cfg);
+              queueConfigSave();
+              listEl.innerHTML = 'Saved device preference.';
+            });
+            li.appendChild(btn);
+            listEl.appendChild(li);
+          });
+        } catch (err) {
+          listEl.textContent = 'Failed to enumerate devices';
+        }
+      });
+    }
   }
 
   async function refreshHookStatus() {
